@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pi-Share Netdisk</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Selection Mode Visuals */
+        .select-checkbox { display: none; }
+        .select-mode .select-checkbox { display: block; }
+        .file-card.selected { border-color: #3b82f6; background-color: #eff6ff; box-shadow: 0 0 0 2px #3b82f6; }
+        
+        #full-view-modal { display: none; }
+        #full-view-modal.active { display: flex; }
+        body.modal-open { overflow: hidden; }
+    </style>
+</head>
+
+<body class="bg-slate-50 text-slate-900 font-sans min-h-screen flex flex-col">
+
+    <header class="bg-white border-b sticky top-0 z-30 shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 py-3 sm:px-6 lg:px-8">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+
+                <div class="flex items-center gap-4">
+                    <h1 class="text-xl font-bold text-blue-600 flex items-center gap-2">
+                        <span>📦</span> <span class="hidden sm:inline">Pi-Share</span>
+                    </h1>
+                    <nav class="flex text-sm font-medium text-slate-500 bg-slate-100 px-3 py-1.5 rounded-lg">
+                        <ol class="flex items-center space-x-2">
+                            <li><a href="/" class="hover:text-blue-600">Root</a></li>
+                            {{if .CurrentPath}}
+                            <li><span class="mx-2">/</span></li>
+                            <li class="text-slate-900 truncate max-w-[150px]">{{.CurrentPath}}</li>
+                            {{end}}
+                        </ol>
+                    </nav>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <label class="cursor-pointer flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition">
+                        <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                        Add
+                        <input type="file" class="hidden" multiple onchange="handleUpload(this)">
+                    </label>
+
+                    <button id="btn-select-mode" onclick="toggleSelectMode()" class="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition">
+                        Select
+                    </button>
+
+                    <div id="bulk-actions" class="hidden flex items-center gap-2 border-l pl-2 border-slate-200">
+                        <button onclick="downloadSelected()" class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition">Download</button>
+                        <button onclick="deleteSelected()" class="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition">Delete</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main id="main-container" class="max-w-7xl mx-auto px-4 py-8 sm:px-6 lg:px-8 flex-grow w-full">
+
+        {{if .ParentPath}}
+        <div class="mb-6">
+            <a href="/?path={{.ParentPath}}" class="inline-flex items-center text-sm font-medium text-slate-600 hover:text-blue-600 transition">
+                <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                Parent Folder
+            </a>
+        </div>
+        {{end}}
+
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+            
+            {{range .Items}}
+            {{if eq .MediaType "folder"}}
+            <div class="file-card group relative bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all cursor-pointer overflow-hidden"
+                data-url="{{.URL}}" data-name="{{.Name}}" data-type="{{.MediaType}}" onclick="handleCardClick(event, this)">
+                <div class="select-checkbox absolute top-3 left-3 z-20 pointer-events-none">
+                    <input type="checkbox" class="w-6 h-6 rounded-full border-slate-300 text-blue-600 bg-white/50 backdrop-blur-sm pointer-events-none transition">
+                </div>
+                <div class="aspect-square bg-slate-100 flex items-center justify-center overflow-hidden pointer-events-none">
+                    <svg class="w-20 h-20 text-yellow-400" fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"></path></svg>
+                </div>
+                <div class="p-3 bg-white border-t border-slate-50">
+                    <p class="text-sm font-medium text-slate-700 truncate" title="{{.Name}}">{{.Name}}</p>
+                </div>
+            </div>
+            {{end}}
+            {{end}}
+
+            {{range .Items}}
+            {{if ne .MediaType "folder"}}
+            <div class="file-card group relative bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all cursor-pointer overflow-hidden"
+                data-url="{{.URL}}" data-name="{{.Name}}" data-type="{{.MediaType}}" onclick="handleCardClick(event, this)">
+                <div class="select-checkbox absolute top-3 left-3 z-20 pointer-events-none">
+                    <input type="checkbox" class="w-6 h-6 rounded-full border-slate-300 text-blue-600 bg-white/50 backdrop-blur-sm pointer-events-none transition">
+                </div>
+                <div class="aspect-square bg-slate-100 flex items-center justify-center overflow-hidden pointer-events-none">
+                    {{if eq .MediaType "image"}}
+                    <img src="{{.URL}}" alt="{{.Name}}" class="object-cover w-full h-full">
+                    {{else if eq .MediaType "video"}}
+                    <svg class="w-16 h-16 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                    {{else}}
+                    <svg class="w-16 h-16 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+                    {{end}}
+                </div>
+                <div class="p-3 bg-white border-t border-slate-50">
+                    <p class="text-sm font-medium text-slate-700 truncate" title="{{.Name}}">{{.Name}}</p>
+                </div>
+            </div>
+            {{end}}
+            {{else}}
+            <div class="col-span-full py-20 text-center">
+                <p class="text-slate-400 italic">This folder is empty.</p>
+            </div>
+            {{end}}
+        </div>
+    </main>
+
+    <div id="full-view-modal" onclick="closeFullView()" class="fixed inset-0 z-50 bg-black/90 backdrop-blur-md items-center justify-center p-4">
+        <div class="absolute top-6 right-6 flex items-center gap-6 z-50">
+            <a id="modal-download-btn" href="#" download class="text-white hover:text-blue-400 transition-all flex items-center gap-2">
+                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                <span class="hidden sm:inline font-medium">Download</span>
+            </a>
+            <button onclick="closeFullView()" class="text-white hover:text-red-400 transition-all">
+                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+        </div>
+        <div id="modal-content" class="max-w-5xl max-h-full flex items-center justify-center" onclick="event.stopPropagation()"></div>
+    </div>
+
+    <footer class="mt-auto py-8 border-t bg-white">
+        <p class="text-center text-slate-400 text-xs tracking-widest uppercase">Pi-Share Netdisk &bull; 2026</p>
+    </footer>
+
+    <script>
+        let isSelectMode = false;
+
+        function toggleSelectMode() {
+            isSelectMode = !isSelectMode;
+            const container = document.getElementById('main-container');
+            const btn = document.getElementById('btn-select-mode');
+            const bulkActions = document.getElementById('bulk-actions');
+
+            if (isSelectMode) {
+                container.classList.add('select-mode');
+                btn.innerText = 'Cancel';
+                btn.classList.add('text-blue-600', 'border-blue-600');
+                bulkActions.classList.remove('hidden');
+            } else {
+                container.classList.remove('select-mode');
+                btn.innerText = 'Select';
+                btn.classList.remove('text-blue-600', 'border-blue-600');
+                bulkActions.classList.add('hidden');
+                document.querySelectorAll('.file-card').forEach(c => {
+                    c.classList.remove('selected');
+                    c.querySelector('input[type="checkbox"]').checked = false;
+                });
+            }
+        }
+
+        function handleCardClick(event, card) {
+            const url = card.dataset.url;
+            const type = card.dataset.type;
+            const name = card.dataset.name;
+
+            if (isSelectMode) {
+                const cb = card.querySelector('input[type="checkbox"]');
+                cb.checked = !cb.checked;
+                card.classList.toggle('selected', cb.checked);
+            } else {
+                if (type === 'folder') {
+                    window.location.href = `/?path=${url}`;
+                } else {
+                    openFullView(url, type, name);
+                }
+            }
+        }
+
+        function openFullView(url, type, name) {
+            const modal = document.getElementById('full-view-modal');
+            const content = document.getElementById('modal-content');
+            const downloadBtn = document.getElementById('modal-download-btn');
+
+            downloadBtn.href = url;
+            downloadBtn.download = name;
+
+            if (type === 'image') {
+                content.innerHTML = `<img src="${url}" class="max-w-full max-h-[85vh] rounded shadow-2xl">`;
+            } else if (type === 'video') {
+                content.innerHTML = `<video src="${url}" controls autoplay class="max-w-full max-h-[85vh] rounded shadow-2xl"></video>`;
+            } else {
+                window.open(url, '_blank');
+                return;
+            }
+
+            modal.classList.add('active');
+            document.body.classList.add('modal-open');
+        }
+
+        function closeFullView() {
+            document.getElementById('full-view-modal').classList.remove('active');
+            document.getElementById('modal-content').innerHTML = '';
+            document.body.classList.remove('modal-open');
+        }
+
+        async function handleUpload(input) {
+            const files = input.files;
+            if (files.length === 0) return;
+            const formData = new FormData();
+            const params = new URLSearchParams(window.location.search);
+            formData.append('path', params.get('path') || '.');
+            for (let i = 0; i < files.length; i++) {
+                formData.append('files', files[i]);
+            }
+            try {
+                const response = await fetch('/api/upload', { method: 'POST', body: formData });
+                if (response.ok) window.location.reload();
+            } catch (err) {
+                alert('Upload failed.');
+            }
+        }
+
+        function getSelectedItems() {
+            return Array.from(document.querySelectorAll('.file-card.selected')).map(c => ({ url: c.dataset.url, name: c.dataset.name }));
+        }
+
+        function downloadSelected() {
+            const items = getSelectedItems();
+            if (items.length === 0) return alert('No items selected');
+            items.forEach((item, index) => {
+                setTimeout(() => {
+                    const a = document.createElement('a');
+                    a.href = item.url;
+                    a.download = item.name;
+                    a.click();
+                }, index * 400);
+            });
+        }
+
+        async function deleteSelected() {
+            const items = getSelectedItems();
+            if (items.length === 0) return;
+            if (confirm(`Delete ${items.length} item(s) forever?`)) {
+                const response = await fetch('/api/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ paths: items.map(i => i.url) })
+                });
+                if (response.ok) window.location.reload();
+                else alert('Delete failed.');
+            }
+        }
+    </script>
+</body>
+</html>
