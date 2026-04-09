@@ -15,9 +15,6 @@ import (
 
 const maxMemory = 32 << 20
 
-// Limit to 4 concurrent thumbnail generation tasks (assuming a 4-core Pi)
-var thumbLimiter = make(chan struct{}, 4)
-
 type DeleteRequest struct {
 	Paths []string `json:"paths"`
 }
@@ -127,9 +124,6 @@ func handleThumbnail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Concurrency limit of 4
-	thumbLimiter <- struct{}{}
-
 	// The thumbnail does not exist
 	mediaType := getCategory(originalPath)
 
@@ -144,7 +138,7 @@ func handleThumbnail(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Resize to 256 * 256
-		thumb := imaging.Thumbnail(src, 256, 256, imaging.Box)
+		thumb := imaging.Thumbnail(src, 256, 256, imaging.Lanczos)
 
 		err = imaging.Save(thumb, cacheFilePath)
 		if err != nil {
@@ -174,8 +168,6 @@ func handleThumbnail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "No thumbnail for this type", http.StatusBadRequest)
 		return
 	}
-
-	<-thumbLimiter
 
 	// Serve thumbnail
 	http.ServeFile(w, r, cacheFilePath)
