@@ -118,10 +118,17 @@ func handleThumbnail(w http.ResponseWriter, r *http.Request) {
 
 	cacheFilePath := filepath.Join(cachePath, flatName)
 
-	if _, err := os.Stat(cacheFilePath); err == nil {
-		// The thumbnail already exists
-		http.ServeFile(w, r, cacheFilePath)
-		return
+	info, err := os.Stat(cacheFilePath)
+	if err == nil {
+		// Detect broken cache
+		if info.Size() > 0 {
+			// Valid file
+			http.ServeFile(w, r, cacheFilePath)
+			return
+		}
+		// The file exists but is 0 bytes
+		log.Printf("Detected broken 0-byte cache file, regenerating: %s", cacheFilePath)
+		os.Remove(cacheFilePath) // Delete the garbage file
 	}
 
 	// The thumbnail does not exist
@@ -146,6 +153,13 @@ func handleThumbnail(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Cache write failed", http.StatusInternalServerError)
 			return
 		}
+		info, err = os.Stat(cacheFilePath)
+		if err != nil || info.Size() == 0 {
+			os.Remove(cacheFilePath)
+			http.Error(w, "Generated empty file", http.StatusInternalServerError)
+
+			return
+		}
 	case "video":
 		// Run FFmpeg to extract a single frame
 		cmd := exec.Command("ffmpeg",
@@ -162,6 +176,13 @@ func handleThumbnail(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Printf("FFmpeg failed for %s: %v", originalPath, err)
 			http.Error(w, "Video thumbnail failed", http.StatusInternalServerError)
+			return
+		}
+		info, err = os.Stat(cacheFilePath)
+		if err != nil || info.Size() == 0 {
+			os.Remove(cacheFilePath)
+			http.Error(w, "Generated empty file", http.StatusInternalServerError)
+
 			return
 		}
 	default:
