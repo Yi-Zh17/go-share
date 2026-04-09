@@ -32,33 +32,44 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 
 	// Retrieve files
 	for _, fileHeader := range r.MultipartForm.File["files"] {
-		// Open file
-		source, err := fileHeader.Open()
+
+		// Wrap the file operations in an anonymous function.
+		// This forces the 'defer' statements to execute at the end of each loop iteration.
+		err := func() error {
+			// Open file
+			source, err := fileHeader.Open()
+			if err != nil {
+				return err // Return the error to the outer loop
+			}
+			// Close source when this anonymous function finishes
+			defer source.Close()
+
+			// Create paths
+			cleanFileName := filepath.Base(fileHeader.Filename)
+			fullDiskPath := filepath.Join(folderPath, subPath, cleanFileName)
+
+			// Create destination files
+			destination, err := os.Create(fullDiskPath)
+			if err != nil {
+				return err
+			}
+			defer destination.Close()
+
+			// Copy files
+			if _, err := io.Copy(destination, source); err != nil {
+				return err
+			}
+
+			return nil // Success for this file
+		}()
+
+		// If the anonymous function returned an error, halt the upload process
 		if err != nil {
-			http.Error(w, "Cannot open file", http.StatusInternalServerError)
-			return
-		}
-		// Close source when finish
-		defer source.Close()
-
-		// Create paths
-		cleanFileName := filepath.Base(fileHeader.Filename)
-		fullDiskPath := filepath.Join(folderPath, subPath, cleanFileName)
-
-		// Create destination files
-		destination, err := os.Create(fullDiskPath)
-		if err != nil {
-			http.Error(w, "Could not create file on disk", http.StatusInternalServerError)
-			return
-		}
-		defer destination.Close()
-
-		// Copy files
-		if _, err := io.Copy(destination, source); err != nil {
-			http.Error(w, "Failed to save file", http.StatusInternalServerError)
+			http.Error(w, "Failed to save file: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 	}
+
 	// Reply to browser
 	w.WriteHeader(http.StatusOK)
 }
