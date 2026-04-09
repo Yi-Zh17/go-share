@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 )
 
@@ -13,6 +14,7 @@ const port = ":8080"
 const url = "10.42.0.127"
 
 var folderPath string
+var cachePath string
 
 func main() {
 	// Get share folder absolute path
@@ -22,6 +24,14 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// Get cache path
+	cachePath = filepath.Join(folderPath, ".cache")
+
+	// Create cache folder if not existing
+	if err := os.MkdirAll(cachePath, 0755); err != nil {
+		log.Fatal("Cannot create a cache folder:", err)
+	}
+
 	// Set up the server
 	server := http.NewServeMux()
 	fileServer := http.StripPrefix(prefix, http.FileServer(http.Dir(folderPath)))
@@ -29,6 +39,7 @@ func main() {
 	server.HandleFunc("/", handleGallery)
 	server.HandleFunc("/api/upload", handleUpload)
 	server.HandleFunc("/api/delete", handleDelete)
+	server.HandleFunc("/api/thumb", handleThumbnail)
 
 	fmt.Println("The server is listening on", url+port)
 	log.Fatal(http.ListenAndServe(":8080", server))

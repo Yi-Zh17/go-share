@@ -83,6 +83,9 @@ func handleGallery(w http.ResponseWriter, r *http.Request) {
 		// Check if folder
 		mediaType := getCategory(file.Name())
 		if file.IsDir() {
+			if file.Name() == ".cache" {
+				continue // Hide cache folder
+			}
 			mediaType = "folder"
 			webURL = path.Join(subPath, file.Name())
 		} else {
