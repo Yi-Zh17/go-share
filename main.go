@@ -11,7 +11,6 @@ import (
 const folder = "./folder"
 const prefix = "/folder/"
 const port = ":8080"
-const url = "10.42.0.127"
 
 var folderPath string
 var cachePath string
@@ -41,7 +40,7 @@ func main() {
 	server.HandleFunc("/api/delete", handleDelete)
 	server.HandleFunc("/api/thumb", handleThumbnail)
 
-	fmt.Println("The server is listening on", url+port)
+	fmt.Println("The server is listening on port", port)
 	log.Fatal(http.ListenAndServe(":8080", server))
 
 }
