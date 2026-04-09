@@ -135,11 +135,11 @@
                 <div
                     class="aspect-square bg-slate-100 flex items-center justify-center overflow-hidden pointer-events-none relative">
                     {{if eq .MediaType "image"}}
-                    <img src="/api/thumb?path={{.URL}}" alt="{{.Name}}" loading="lazy"
+                    <img src="/api/thumb?path={{.URL}}" alt="{{.Name}}"
                         class="object-cover w-full h-full group-hover:scale-105 transition-transform duration-300">
 
                     {{else if eq .MediaType "video"}}
-                    <img src="/api/thumb?path={{.URL}}" alt="{{.Name}}" loading="lazy"
+                    <img src="/api/thumb?path={{.URL}}" alt="{{.Name}}"
                         class="object-cover w-full h-full group-hover:scale-105 transition-transform duration-300 opacity-90">
                     <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
                         <div
