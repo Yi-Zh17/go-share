@@ -121,7 +121,7 @@ func main() {
 	// Launch the background worker in its own Goroutine
 	go startBackgroundWorker()
 
-	fmt.Println("The server is listening on port", port)
+	fmt.Println("The server is listening on localhost", port)
 	log.Fatal(http.ListenAndServe(":8080", server))
 
 }
