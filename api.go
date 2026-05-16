@@ -15,6 +15,11 @@ import (
 
 const maxMemory = 32 << 20
 
+// Limit to 2 concurrent thumbnail generations.
+// On a 4-core Pi this leaves 2 cores free for gallery, delete, and upload requests
+// so the UI stays responsive during bulk thumbnail work.
+var thumbLimiter = make(chan struct{}, 2)
+
 type DeleteRequest struct {
 	Paths []string `json:"paths"`
 }
@@ -142,7 +147,11 @@ func handleThumbnail(w http.ResponseWriter, r *http.Request) {
 		os.Remove(cacheFilePath) // Delete the garbage file
 	}
 
-	// The thumbnail does not exist
+	// The thumbnail does not exist — acquire a concurrency slot.
+	// Use defer so a generation error never permanently leaks a slot.
+	thumbLimiter <- struct{}{}
+	defer func() { <-thumbLimiter }()
+
 	mediaType := getCategory(originalPath)
 
 	switch mediaType {

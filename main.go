@@ -8,7 +8,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/disintegration/imaging"
 )
 
 const folder = "./folder"
@@ -19,17 +22,16 @@ var folderPath string
 var cachePath string
 
 func startBackgroundWorker() {
-	// Infinite loop so the worker runs as long as the server is alive
 	for {
 		log.Println("Background worker: Starting directory scan...")
 
-		// Walk through every file in your shared folder
+		var wg sync.WaitGroup
+
 		filepath.WalkDir(folderPath, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return nil
 			}
 
-			// 1. Skip directories. CRITICAL: Skip the .cache folder itself!
 			if d.IsDir() {
 				if d.Name() == ".cache" {
 					return filepath.SkipDir
@@ -37,58 +39,63 @@ func startBackgroundWorker() {
 				return nil
 			}
 
-			// 2. Check if it's media
 			mediaType := getCategory(path)
 			if mediaType != "image" && mediaType != "video" {
 				return nil
 			}
 
-			// 3. Construct the expected cache filename
 			relPath, _ := filepath.Rel(folderPath, path)
 			flatName := strings.ReplaceAll(relPath, string(filepath.Separator), "_")
 			flatName = strings.TrimSuffix(flatName, filepath.Ext(flatName)) + ".jpg"
 			cacheFilePath := filepath.Join(cachePath, flatName)
 
-			// 4. Check if a valid thumbnail already exists
 			info, err := os.Stat(cacheFilePath)
 			if err == nil && info.Size() > 0 {
-				return nil // It exists and is valid, skip to the next file
+				return nil
 			}
 
-			// 5. If we reach here, it's missing or broken. Generate it.
 			log.Printf("Background worker: Generating thumbnail for %s", relPath)
 
-			if mediaType == "image" {
-				exec.Command("ffmpeg",
-					"-v", "error",
-					"-i", path,
-					"-vframes", "1",
-					"-vf", "scale=256:-1",
-					"-threads", "1",
-					"-y",
-					cacheFilePath,
-				).Run()
-			} else if mediaType == "video" {
-				exec.Command("ffmpeg",
-					"-v", "error",
-					"-ss", "00:00:01.000",
-					"-i", path,
-					"-vframes", "1",
-					"-vf", "scale=256:-1",
-					"-threads", "1",
-					"-y",
-					cacheFilePath,
-				).Run()
-			}
+			wg.Add(1)
+			go func(media, src, dst string) {
+				defer wg.Done()
 
-			// 6. HARDWARE SAFETY: Sleep for 500ms to let the Pi's CPU and SD card breathe
-			time.Sleep(500 * time.Millisecond)
+				// Acquire semaphore slot (shared with on-demand requests)
+				thumbLimiter <- struct{}{}
+				defer func() { <-thumbLimiter }()
+
+				switch media {
+				case "image":
+					srcImg, err := imaging.Open(src)
+					if err != nil {
+						log.Printf("Background worker: failed to open %s: %v", src, err)
+						return
+					}
+					thumb := imaging.Thumbnail(srcImg, 256, 256, imaging.Lanczos)
+					if err := imaging.Save(thumb, dst); err != nil {
+						log.Printf("Background worker: failed to save thumbnail for %s: %v", src, err)
+					}
+				case "video":
+					cmd := exec.Command("ffmpeg",
+						"-v", "error",
+						"-ss", "00:00:01.000",
+						"-i", src,
+						"-vframes", "1",
+						"-vf", "scale=256:-1",
+						"-threads", "1",
+						"-y", dst,
+					)
+					if err := cmd.Run(); err != nil {
+						log.Printf("Background worker: ffmpeg failed for %s: %v", src, err)
+					}
+				}
+			}(mediaType, path, cacheFilePath)
 
 			return nil
 		})
 
+		wg.Wait()
 		log.Println("Background worker: Scan complete. Sleeping for 10 minutes.")
-		// Sleep for 10 minutes before scanning the drive again
 		time.Sleep(10 * time.Minute)
 	}
 }
@@ -122,6 +129,12 @@ func main() {
 	go startBackgroundWorker()
 
 	fmt.Println("The server is listening on localhost", port)
-	log.Fatal(http.ListenAndServe(":8080", server))
+	log.Fatal((&http.Server{
+		Addr:         port,
+		Handler:      server,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 120 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}).ListenAndServe())
 
 }
