@@ -60,7 +60,7 @@ func startBackgroundWorker() {
 			go func(media, src, dst string) {
 				defer wg.Done()
 
-				// Acquire semaphore slot (shared with on-demand requests)
+				// Acquire semaphore slot for background generation
 				thumbLimiter <- struct{}{}
 				defer func() { <-thumbLimiter }()
 
