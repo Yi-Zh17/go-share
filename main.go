@@ -5,13 +5,9 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
-	"sync"
+	"runtime"
 	"time"
-
-	"github.com/disintegration/imaging"
 )
 
 const folder = "./folder"
@@ -24,8 +20,6 @@ var cachePath string
 func startBackgroundWorker() {
 	for {
 		log.Println("Background worker: Starting directory scan...")
-
-		var wg sync.WaitGroup
 
 		filepath.WalkDir(folderPath, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
@@ -44,63 +38,23 @@ func startBackgroundWorker() {
 				return nil
 			}
 
-			relPath, _ := filepath.Rel(folderPath, path)
-			flatName := strings.ReplaceAll(relPath, string(filepath.Separator), "_")
-			flatName = strings.TrimSuffix(flatName, filepath.Ext(flatName)) + ".jpg"
-			cacheFilePath := filepath.Join(cachePath, flatName)
-
-			info, err := os.Stat(cacheFilePath)
-			if err == nil && info.Size() > 0 {
+			job, err := buildThumbnailJob(path)
+			if err != nil {
 				return nil
 			}
-
-			log.Printf("Background worker: Generating thumbnail for %s", relPath)
-
-			wg.Add(1)
-			go func(media, src, dst string) {
-				defer wg.Done()
-
-				// Acquire semaphore slot for background generation
-				thumbLimiter <- struct{}{}
-				defer func() { <-thumbLimiter }()
-
-				switch media {
-				case "image":
-					srcImg, err := imaging.Open(src)
-					if err != nil {
-						log.Printf("Background worker: failed to open %s: %v", src, err)
-						return
-					}
-					thumb := imaging.Thumbnail(srcImg, 256, 256, imaging.Lanczos)
-					if err := imaging.Save(thumb, dst); err != nil {
-						log.Printf("Background worker: failed to save thumbnail for %s: %v", src, err)
-					}
-				case "video":
-					cmd := exec.Command("ffmpeg",
-						"-v", "error",
-						"-ss", "00:00:01.000",
-						"-i", src,
-						"-vframes", "1",
-						"-vf", "scale=256:-1",
-						"-threads", "1",
-						"-y", dst,
-					)
-					if err := cmd.Run(); err != nil {
-						log.Printf("Background worker: ffmpeg failed for %s: %v", src, err)
-					}
-				}
-			}(mediaType, path, cacheFilePath)
+			thumbManager.schedule(job)
 
 			return nil
 		})
 
-		wg.Wait()
 		log.Println("Background worker: Scan complete. Sleeping for 10 minutes.")
 		time.Sleep(10 * time.Minute)
 	}
 }
 
 func main() {
+	runtime.GOMAXPROCS(runtime.NumCPU())
+
 	// Get share folder absolute path
 	var err error
 	folderPath, err = filepath.Abs(folder)
@@ -126,6 +80,7 @@ func main() {
 	server.HandleFunc("/api/thumb", handleThumbnail)
 
 	// Launch the background worker in its own Goroutine
+	log.Printf("Thumbnail workers: %d active, %d core reserved for HTTP/UI", workerCount(), reservedCPUCores)
 	go startBackgroundWorker()
 
 	fmt.Println("The server is listening on localhost", port)

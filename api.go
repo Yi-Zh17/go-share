@@ -2,24 +2,16 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-
-	"github.com/disintegration/imaging"
 )
 
 const maxMemory = 32 << 20
-
-// Limit to 3 concurrent background thumbnail generations.
-// On a 4-core Pi this leaves 1 core free for HTTP handlers and disk I/O.
-// On-demand requests (handleThumbnail) skip the limiter when all slots are taken
-// so the UI never blocks during bulk thumbnail work.
-var thumbLimiter = make(chan struct{}, 3)
 
 type DeleteRequest struct {
 	Paths []string `json:"paths"`
@@ -66,6 +58,10 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 
+			if job, err := buildThumbnailJob(fullDiskPath); err == nil {
+				thumbManager.schedule(job)
+			}
+
 			return nil // Success for this file
 		}()
 
@@ -107,6 +103,12 @@ func handleDelete(w http.ResponseWriter, r *http.Request) {
 		if err := os.RemoveAll(fullPath); err != nil {
 			log.Printf("Failed to delete %s: %v", fullPath, err)
 		}
+
+		if job, err := buildThumbnailJob(fullPath); err == nil {
+			if err := os.Remove(job.cachePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+				log.Printf("Failed to delete cache %s: %v", job.cachePath, err)
+			}
+		}
 	}
 }
 
@@ -128,93 +130,18 @@ func handleThumbnail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Define the cache filename
-	flatName := strings.ReplaceAll(cleanSubPath, string(filepath.Separator), "_")
-	// Force jpg format
-	flatName = strings.TrimSuffix(flatName, filepath.Ext(flatName)) + ".jpg"
-
-	cacheFilePath := filepath.Join(cachePath, flatName)
-
-	info, err := os.Stat(cacheFilePath)
-	if err == nil {
-		// Detect broken cache
-		if info.Size() > 0 {
-			// Valid file
-			http.ServeFile(w, r, cacheFilePath)
-			return
-		}
-		// The file exists but is 0 bytes
-		log.Printf("Detected broken 0-byte cache file, regenerating: %s", cacheFilePath)
-		os.Remove(cacheFilePath) // Delete the garbage file
-	}
-
-	// The thumbnail does not exist — acquire a concurrency slot.
-	// Use defer so a generation error never permanently leaks a slot.
-	select {
-	case thumbLimiter <- struct{}{}:
-		defer func() { <-thumbLimiter }()
-	default:
-		log.Printf("On-demand thumbnail for %s: all workers busy, proceeding without limit", cleanSubPath)
-	}
-
-	mediaType := getCategory(originalPath)
-
-	switch mediaType {
-	case "image":
-		// Open original image
-		src, err := imaging.Open(originalPath)
-		if err != nil {
-			log.Printf("Failed to open image for thumbnail: %v", err)
-			http.Error(w, "Thumbnail generation failed", http.StatusInternalServerError)
-			return
-		}
-
-		// Resize to 256 * 256
-		thumb := imaging.Thumbnail(src, 256, 256, imaging.Lanczos)
-
-		err = imaging.Save(thumb, cacheFilePath)
-		if err != nil {
-			log.Printf("Failed to save image thumbnail: %v", err)
-			http.Error(w, "Cache write failed", http.StatusInternalServerError)
-			return
-		}
-		info, err = os.Stat(cacheFilePath)
-		if err != nil || info.Size() == 0 {
-			os.Remove(cacheFilePath)
-			http.Error(w, "Generated empty file", http.StatusInternalServerError)
-
-			return
-		}
-	case "video":
-		// Run FFmpeg to extract a single frame
-		cmd := exec.Command("ffmpeg",
-			"-ss", "00:00:01:000", // Extract at 1 second
-			"-i", originalPath,
-			"-vframes", "1", // Output 1 frame
-			"-vf", "scale=256:-1", // Resize width to 256px, keep aspect ratio
-			"-threads", "1",
-			"-y", // Overwrite if exists
-			cacheFilePath,
-		)
-
-		err := cmd.Run()
-		if err != nil {
-			log.Printf("FFmpeg failed for %s: %v", originalPath, err)
-			http.Error(w, "Video thumbnail failed", http.StatusInternalServerError)
-			return
-		}
-		info, err = os.Stat(cacheFilePath)
-		if err != nil || info.Size() == 0 {
-			os.Remove(cacheFilePath)
-			http.Error(w, "Generated empty file", http.StatusInternalServerError)
-
-			return
-		}
-	default:
+	job, err := buildThumbnailJob(originalPath)
+	if err != nil {
 		http.Error(w, "No thumbnail for this type", http.StatusBadRequest)
 		return
 	}
 
+	if err := thumbManager.ensure(job, true); err != nil {
+		log.Printf("Thumbnail generation failed for %s: %v", originalPath, err)
+		http.Error(w, "Thumbnail generation failed", http.StatusInternalServerError)
+		return
+	}
+
 	// Serve thumbnail
-	http.ServeFile(w, r, cacheFilePath)
+	http.ServeFile(w, r, job.cachePath)
 }
