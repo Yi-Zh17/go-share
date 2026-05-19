@@ -73,11 +73,7 @@ func (m *thumbnailManager) ensure(job thumbnailJob, priority bool) error {
 
 	task, enqueue := m.register(job)
 	if enqueue {
-		queue := m.background
-		if priority {
-			queue = m.foreground
-		}
-		queue <- job
+		m.enqueue(job, priority, true)
 	}
 
 	<-task.done
@@ -91,7 +87,28 @@ func (m *thumbnailManager) schedule(job thumbnailJob) {
 
 	_, enqueue := m.register(job)
 	if enqueue {
-		m.background <- job
+		m.enqueue(job, false, false)
+	}
+}
+
+func (m *thumbnailManager) enqueue(job thumbnailJob, priority bool, block bool) {
+	queue := m.background
+	if priority {
+		queue = m.foreground
+	}
+
+	if block {
+		queue <- job
+		return
+	}
+
+	select {
+	case queue <- job:
+	default:
+		// Do not block uploads or the scanner when the queue is saturated.
+		go func() {
+			queue <- job
+		}()
 	}
 }
 
