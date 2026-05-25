@@ -757,14 +757,18 @@
                         <div class="p-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">`;
 
                 group.files.forEach((file, fi) => {
+                    const relPath = file.url.replace('/folder/', '');
                     html += `
                         <label class="relative flex flex-col items-center bg-slate-50 rounded-lg border border-slate-200 hover:border-blue-400 cursor-pointer transition p-2">
-                            <img src="/api/thumb?path=${encodeURIComponent(file.url)}" alt="${escapeHtml(file.name)}"
-                                class="w-full aspect-square object-cover rounded-md mb-2 bg-slate-200"
-                                loading="lazy"
-                                onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23e2e8f0%22 width=%22100%22 height=%22100%22/><text x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%2394a3b8%22 font-size=%2230%22>?</text></svg>'">
-                            <input type="checkbox" value="${escapeHtml(file.url)}" class="dup-checkbox dup-checkbox-${gi} absolute top-2 left-2 w-5 h-5 rounded text-red-600 bg-white shadow" checked onchange="updateDupSelectedInfo()">
-                            <span class="text-xs text-slate-600 truncate w-full text-center" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span>
+                            <a href="${encodeURIComponent(file.url)}" target="_blank" onclick="event.stopPropagation()" class="w-full" title="Open original in new tab">
+                                <img src="/api/thumb?path=${encodeURIComponent(file.url)}" alt="${escapeHtml(file.name)}"
+                                    class="w-full aspect-square object-cover rounded-md mb-2 bg-slate-200"
+                                    loading="lazy"
+                                    onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23e2e8f0%22 width=%22100%22 height=%22100%22/><text x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%2394a3b8%22 font-size=%2230%22>?</text></svg>'">
+                            </a>
+                            <input type="checkbox" value="${escapeHtml(file.url)}" class="dup-checkbox dup-checkbox-${gi} absolute top-2 left-2 w-5 h-5 rounded text-red-600 bg-white shadow" ${fi > 0 ? 'checked' : ''} onchange="updateDupSelectedInfo()">
+                            <span class="text-xs text-slate-600 truncate w-full text-center font-medium">${escapeHtml(file.name)}</span>
+                            <span class="text-[10px] text-slate-400 truncate w-full text-center">${escapeHtml(relPath)} &middot; ${formatFileSize(file.size)}</span>
                         </label>`;
                 });
 

@@ -27,6 +27,10 @@ type DeleteRequest struct {
 	Paths []string `json:"paths"`
 }
 
+func cacheKeyFor(relPath string) string {
+	return strings.ReplaceAll(relPath, string(filepath.Separator), "_") + ".jpg"
+}
+
 func resolveCollision(path string) string {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return path
@@ -143,9 +147,7 @@ func handleDelete(w http.ResponseWriter, r *http.Request) {
 
 		// Also remove cached thumbnail so a future file with the same name
 		// doesn't inherit a stale preview.
-		flatName := strings.ReplaceAll(relPath, string(filepath.Separator), "_")
-		flatName = strings.TrimSuffix(flatName, filepath.Ext(flatName)) + ".jpg"
-		cacheFile := filepath.Join(cachePath, flatName)
+		cacheFile := filepath.Join(cachePath, cacheKeyFor(relPath))
 		os.Remove(cacheFile)
 	}
 }
@@ -169,11 +171,7 @@ func handleThumbnail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Define the cache filename
-	flatName := strings.ReplaceAll(cleanSubPath, string(filepath.Separator), "_")
-	// Force jpg format
-	flatName = strings.TrimSuffix(flatName, filepath.Ext(flatName)) + ".jpg"
-
-	cacheFilePath := filepath.Join(cachePath, flatName)
+	cacheFilePath := filepath.Join(cachePath, cacheKeyFor(cleanSubPath))
 
 	info, err := os.Stat(cacheFilePath)
 	if err == nil {

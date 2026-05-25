@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -45,9 +44,7 @@ func startBackgroundWorker() {
 			}
 
 			relPath, _ := filepath.Rel(folderPath, path)
-			flatName := strings.ReplaceAll(relPath, string(filepath.Separator), "_")
-			flatName = strings.TrimSuffix(flatName, filepath.Ext(flatName)) + ".jpg"
-			cacheFilePath := filepath.Join(cachePath, flatName)
+			cacheFilePath := filepath.Join(cachePath, cacheKeyFor(relPath))
 
 			info, err := os.Stat(cacheFilePath)
 			if err == nil && info.Size() > 0 {
