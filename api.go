@@ -28,7 +28,9 @@ type DeleteRequest struct {
 }
 
 func cacheKeyFor(relPath string) string {
-	return strings.ReplaceAll(relPath, string(filepath.Separator), "_") + ".jpg"
+	normalized := filepath.ToSlash(filepath.Clean(strings.ReplaceAll(relPath, "\\", "/")))
+	sum := sha256.Sum256([]byte(normalized))
+	return fmt.Sprintf("%x.jpg", sum)
 }
 
 func resolveCollision(path string) string {
@@ -352,8 +354,8 @@ func handleScanDuplicates(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		group := DupGroup{
-			Hash: hash,
-			Size: files[0].size,
+			Hash:  hash,
+			Size:  files[0].size,
 			Files: make([]DupFile, 0, len(files)),
 		}
 		for _, f := range files {
