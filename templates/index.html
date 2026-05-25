@@ -276,7 +276,7 @@
             </svg>
         </button>
 
-        <div id="modal-content" class="max-w-5xl max-h-full flex items-center justify-center"
+        <div id="modal-content" class="max-h-full flex items-center justify-center"
             onclick="event.stopPropagation()"></div>
     </div>
 
@@ -397,11 +397,11 @@
         function renderModalContent(url, type) {
             const content = document.getElementById('modal-content');
             if (type === 'image') {
-                content.innerHTML = `<img src="${url}" id="zoom-image" class="max-w-full max-h-[85vh] rounded shadow-2xl" style="transform: scale(1); cursor: zoom-in;">`;
+                content.innerHTML = `<img src="${url}" id="zoom-image" class="max-w-[95vw] max-h-[92vh] rounded shadow-2xl" style="transform: scale(1); cursor: zoom-in;">`;
                 zoomScale = 1;
                 zoomX = 0;
                 zoomY = 0;
-                content.style.overflow = 'hidden';
+                content.style.overflow = 'visible';
             } else if (type === 'video') {
                 content.innerHTML = `<video src="${url}" controls autoplay class="max-w-full max-h-[85vh] rounded shadow-2xl"></video>`;
                 content.style.overflow = '';
