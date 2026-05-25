@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -23,6 +25,36 @@ var thumbLimiter = make(chan struct{}, 3)
 
 type DeleteRequest struct {
 	Paths []string `json:"paths"`
+}
+
+func resolveCollision(path string) string {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return path
+	}
+	ext := filepath.Ext(path)
+	base := strings.TrimSuffix(path, ext)
+	for i := 1; ; i++ {
+		candidate := fmt.Sprintf("%s (%d)%s", base, i, ext)
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+			return candidate
+		}
+	}
+}
+
+type DupFile struct {
+	URL  string `json:"url"`
+	Name string `json:"name"`
+	Size int64  `json:"size"`
+}
+
+type DupGroup struct {
+	Hash  string    `json:"hash"`
+	Size  int64     `json:"size"`
+	Files []DupFile `json:"files"`
+}
+
+type ScanResult struct {
+	Groups []DupGroup `json:"groups"`
 }
 
 func handleUpload(w http.ResponseWriter, r *http.Request) {
@@ -53,6 +85,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 			// Create paths
 			cleanFileName := filepath.Base(fileHeader.Filename)
 			fullDiskPath := filepath.Join(folderPath, subPath, cleanFileName)
+			fullDiskPath = resolveCollision(fullDiskPath)
 
 			// Create destination files
 			destination, err := os.Create(fullDiskPath)
@@ -217,4 +250,114 @@ func handleThumbnail(w http.ResponseWriter, r *http.Request) {
 
 	// Serve thumbnail
 	http.ServeFile(w, r, cacheFilePath)
+}
+
+func fileHash(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
+}
+
+func handleScanDuplicates(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	type scannedFile struct {
+		path string
+		name string
+		size int64
+	}
+	sizeGroups := make(map[int64][]scannedFile)
+
+	err := filepath.WalkDir(folderPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if d.Name() == ".cache" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if getCategory(path) != "image" {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		sz := info.Size()
+		sizeGroups[sz] = append(sizeGroups[sz], scannedFile{
+			path: path,
+			name: d.Name(),
+			size: sz,
+		})
+		return nil
+	})
+	if err != nil {
+		log.Printf("Duplicate scan walk failed: %v", err)
+		http.Error(w, "Scan failed", http.StatusInternalServerError)
+		return
+	}
+
+	type hashedFile struct {
+		path string
+		name string
+		size int64
+	}
+	hashGroups := make(map[string][]hashedFile)
+
+	for _, files := range sizeGroups {
+		if len(files) < 2 {
+			continue
+		}
+		for _, f := range files {
+			h, err := fileHash(f.path)
+			if err != nil {
+				log.Printf("Failed to hash %s: %v", f.path, err)
+				continue
+			}
+			hashGroups[h] = append(hashGroups[h], hashedFile{
+				path: f.path,
+				name: f.name,
+				size: f.size,
+			})
+		}
+	}
+
+	var result ScanResult
+	for hash, files := range hashGroups {
+		if len(files) < 2 {
+			continue
+		}
+		group := DupGroup{
+			Hash: hash,
+			Size: files[0].size,
+			Files: make([]DupFile, 0, len(files)),
+		}
+		for _, f := range files {
+			relPath, _ := filepath.Rel(folderPath, f.path)
+			group.Files = append(group.Files, DupFile{
+				URL:  prefix + relPath,
+				Name: f.name,
+				Size: f.size,
+			})
+		}
+		result.Groups = append(result.Groups, group)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(result); err != nil {
+		log.Printf("Failed to encode scan result: %v", err)
+	}
 }

@@ -124,6 +124,7 @@ func main() {
 	server.HandleFunc("/api/upload", handleUpload)
 	server.HandleFunc("/api/delete", handleDelete)
 	server.HandleFunc("/api/thumb", handleThumbnail)
+	server.HandleFunc("/api/scan-duplicates", handleScanDuplicates)
 
 	// Launch the background worker in its own Goroutine
 	go startBackgroundWorker()
