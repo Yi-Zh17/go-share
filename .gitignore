@@ -3,3 +3,5 @@ main
 netdisk
 .cache/
 go-share
+.gomodcache/
+.gocache/
