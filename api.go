@@ -140,6 +140,13 @@ func handleDelete(w http.ResponseWriter, r *http.Request) {
 		if err := os.RemoveAll(fullPath); err != nil {
 			log.Printf("Failed to delete %s: %v", fullPath, err)
 		}
+
+		// Also remove cached thumbnail so a future file with the same name
+		// doesn't inherit a stale preview.
+		flatName := strings.ReplaceAll(relPath, string(filepath.Separator), "_")
+		flatName = strings.TrimSuffix(flatName, filepath.Ext(flatName)) + ".jpg"
+		cacheFile := filepath.Join(cachePath, flatName)
+		os.Remove(cacheFile)
 	}
 }
 
@@ -170,15 +177,21 @@ func handleThumbnail(w http.ResponseWriter, r *http.Request) {
 
 	info, err := os.Stat(cacheFilePath)
 	if err == nil {
-		// Detect broken cache
 		if info.Size() > 0 {
-			// Valid file
-			http.ServeFile(w, r, cacheFilePath)
-			return
+			// Valid size, but check that the original hasn't been modified
+			// since the cache was created (e.g. file deleted and a new
+			// file uploaded under the same name).
+			origInfo, origErr := os.Stat(originalPath)
+			if origErr != nil || !info.ModTime().Before(origInfo.ModTime()) {
+				http.ServeFile(w, r, cacheFilePath)
+				return
+			}
+			log.Printf("Stale thumbnail cache for %s, regenerating", cleanSubPath)
+			os.Remove(cacheFilePath)
+		} else {
+			log.Printf("Detected broken 0-byte cache file, regenerating: %s", cacheFilePath)
+			os.Remove(cacheFilePath)
 		}
-		// The file exists but is 0 bytes
-		log.Printf("Detected broken 0-byte cache file, regenerating: %s", cacheFilePath)
-		os.Remove(cacheFilePath) // Delete the garbage file
 	}
 
 	// The thumbnail does not exist — acquire a concurrency slot.
