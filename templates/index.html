@@ -111,6 +111,15 @@
                         <input type="file" class="hidden" multiple onchange="handleUpload(this)">
                     </label>
 
+                    <button id="btn-new-folder" onclick="createFolder()"
+                        class="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition flex items-center gap-1.5">
+                        <svg class="w-4 h-4 text-yellow-500" fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"></path>
+                            <path stroke="white" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10 9v4M8 11h4"></path>
+                        </svg>
+                        <span class="hidden sm:inline">New Folder</span>
+                    </button>
+
                     <button id="btn-select-mode" onclick="toggleSelectMode()"
                         class="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition">
                         Select
@@ -125,6 +134,8 @@
                     </button>
 
                     <div id="bulk-actions" class="hidden flex items-center gap-2 border-l pl-2 border-slate-200">
+                        <button onclick="moveSelected()"
+                            class="px-4 py-2 text-sm font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600 transition">Move</button>
                         <button onclick="downloadSelected()"
                             class="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition">Download</button>
                         <button onclick="deleteSelected()"
@@ -312,6 +323,35 @@
                         Delete Selected
                     </button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Move-to-Folder Picker Modal -->
+    <div id="folder-picker-modal" onclick="closeFolderPicker()"
+        class="fixed inset-0 z-50 bg-black/60 items-center justify-center p-4" style="display:none;">
+        <div onclick="event.stopPropagation()" class="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[80vh] flex flex-col">
+            <div class="flex items-center justify-between px-6 py-4 border-b border-slate-200 shrink-0">
+                <h2 class="text-lg font-bold text-slate-800">Move to Folder</h2>
+                <button onclick="closeFolderPicker()" class="text-slate-400 hover:text-slate-600 transition p-1">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            <div id="folder-picker-breadcrumb" class="px-6 py-2 text-xs text-slate-500 bg-slate-50 border-b border-slate-100 shrink-0">
+            </div>
+            <div id="folder-picker-list" class="flex-1 overflow-y-auto px-4 py-3 space-y-1">
+            </div>
+            <div class="flex items-center justify-between px-6 py-4 border-t border-slate-200 shrink-0">
+                <button id="btn-move-here" onclick="selectMoveDest()"
+                    class="px-4 py-2 text-sm font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600 transition">
+                    Move Here
+                </button>
+                <button onclick="closeFolderPicker()"
+                    class="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition">
+                    Cancel
+                </button>
             </div>
         </div>
     </div>
@@ -664,6 +704,125 @@
             mouseY = e.clientY;
         });
 
+        // ---- Create Folder ----
+
+        async function createFolder() {
+            const name = prompt('Enter folder name:');
+            if (!name || !name.trim()) return;
+            const params = new URLSearchParams(window.location.search);
+            const currentPath = params.get('path') || '.';
+            try {
+                const response = await fetch('/api/mkdir', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: currentPath, name: name.trim() })
+                });
+                if (response.ok) {
+                    window.location.reload();
+                } else {
+                    const text = await response.text();
+                    alert('Failed to create folder: ' + text);
+                }
+            } catch (err) {
+                alert('Request failed: ' + err.message);
+            }
+        }
+
+        // ---- Move to Folder ----
+
+        let movePendingPaths = [];
+        let moveDestPath = '';
+
+        function moveSelected() {
+            const items = getSelectedItems();
+            if (items.length === 0) return alert('No items selected');
+            movePendingPaths = items.map(i => i.url);
+            moveDestPath = '';
+            navigateFolderPicker('/folder/');
+        }
+
+        async function navigateFolderPicker(path) {
+            moveDestPath = path;
+            const modal = document.getElementById('folder-picker-modal');
+            const list = document.getElementById('folder-picker-list');
+            const breadcrumb = document.getElementById('folder-picker-breadcrumb');
+
+            modal.style.display = 'flex';
+            document.body.classList.add('modal-open');
+
+            // Build breadcrumb
+            const parts = path.replace('/folder/', '').split('/').filter(Boolean);
+            let bc = '<a href="#" onclick="event.preventDefault();navigateFolderPicker(\'/folder/\')" class="text-blue-600 hover:underline">Root</a>';
+            let accum = '';
+            for (const p of parts) {
+                accum += '/' + p;
+                bc += ' <span class="text-slate-300">/</span> ';
+                bc += `<a href="#" onclick="event.preventDefault();navigateFolderPicker('/folder${accum}')" class="text-blue-600 hover:underline">${escapeHtml(p)}</a>`;
+            }
+            breadcrumb.innerHTML = bc;
+
+            try {
+                const resp = await fetch(`/api/folders?path=${encodeURIComponent(path.replace('/folder/', ''))}`);
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const data = await resp.json();
+
+                let html = '';
+                if (data.parent) {
+                    html += `
+                        <button onclick="navigateFolderPicker('${data.parent}')"
+                            class="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-100 transition text-left">
+                            <svg class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path>
+                            </svg>
+                            <span class="text-sm text-slate-500">.. (up)</span>
+                        </button>`;
+                }
+                if (data.folders && data.folders.length > 0) {
+                    data.folders.forEach(f => {
+                        html += `
+                            <button onclick="navigateFolderPicker('${f.path}')"
+                                class="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-slate-100 transition text-left">
+                                <svg class="w-5 h-5 text-yellow-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                                    <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"></path>
+                                </svg>
+                                <span class="text-sm text-slate-700 font-medium truncate">${escapeHtml(f.name)}</span>
+                            </button>`;
+                    });
+                } else {
+                    html += '<p class="text-sm text-slate-400 text-center py-8">No subfolders here.</p>';
+                }
+                list.innerHTML = html;
+            } catch (err) {
+                list.innerHTML = `<p class="text-sm text-red-500 text-center py-8">Failed to load folders: ${err.message}</p>`;
+            }
+        }
+
+        async function selectMoveDest() {
+            if (movePendingPaths.length === 0) return;
+            try {
+                const response = await fetch('/api/move', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ paths: movePendingPaths, dest: moveDestPath })
+                });
+                if (response.ok) {
+                    window.location.reload();
+                } else {
+                    const text = await response.text();
+                    alert('Move failed: ' + text);
+                }
+            } catch (err) {
+                alert('Move request failed: ' + err.message);
+            }
+        }
+
+        function closeFolderPicker() {
+            document.getElementById('folder-picker-modal').style.display = 'none';
+            document.body.classList.remove('modal-open');
+            movePendingPaths = [];
+            moveDestPath = '';
+        }
+
         // ---- Duplicate Image Scan ----
 
         function formatFileSize(bytes) {
@@ -842,8 +1001,13 @@
         document.addEventListener('keydown', function(e) {
             const modal = document.getElementById('full-view-modal');
             const dupModal = document.getElementById('dup-modal');
+            const fpModal = document.getElementById('folder-picker-modal');
 
             if (e.key === 'Escape') {
+                if (fpModal.style.display === 'flex') {
+                    closeFolderPicker();
+                    return;
+                }
                 if (dupModal.classList.contains('active')) {
                     closeDupModal();
                     return;

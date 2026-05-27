@@ -63,6 +63,122 @@ type ScanResult struct {
 	Groups []DupGroup `json:"groups"`
 }
 
+func handleMkdir(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Path string `json:"path"`
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+	cleanName := filepath.Base(req.Name)
+	if cleanName == "." || cleanName == ".." || cleanName == "" {
+		http.Error(w, "Invalid folder name", http.StatusBadRequest)
+		return
+	}
+	cleanSubPath := filepath.Clean(strings.TrimPrefix(req.Path, "/"))
+	targetPath := filepath.Join(folderPath, cleanSubPath, cleanName)
+	if !strings.HasPrefix(targetPath, folderPath) {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+	if err := os.MkdirAll(targetPath, 0755); err != nil {
+		http.Error(w, "Failed to create folder: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleMove(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Paths []string `json:"paths"`
+		Dest  string   `json:"dest"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+	destDir := filepath.Join(folderPath, filepath.Clean(strings.TrimPrefix(req.Dest, prefix)))
+	if !strings.HasPrefix(destDir, folderPath) {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+	for _, urlPath := range req.Paths {
+		relPath := strings.TrimPrefix(urlPath, prefix)
+		srcPath := filepath.Join(folderPath, relPath)
+		if !strings.HasPrefix(srcPath, folderPath) {
+			http.Error(w, "Access denied", http.StatusForbidden)
+			return
+		}
+		name := filepath.Base(srcPath)
+		destPath := filepath.Join(destDir, name)
+		destPath = resolveCollision(destPath)
+		if err := os.Rename(srcPath, destPath); err != nil {
+			log.Printf("Failed to move %s to %s: %v", srcPath, destPath, err)
+			http.Error(w, "Move failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		// Move thumbnail cache too
+		srcRel, _ := filepath.Rel(folderPath, srcPath)
+		dstRel, _ := filepath.Rel(folderPath, destPath)
+		os.Rename(
+			filepath.Join(cachePath, cacheKeyFor(srcRel)),
+			filepath.Join(cachePath, cacheKeyFor(dstRel)),
+		)
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleListFolders(w http.ResponseWriter, r *http.Request) {
+	subPath := r.URL.Query().Get("path")
+	if subPath == "" {
+		subPath = "."
+	}
+	cleanSubPath := filepath.Clean(strings.TrimPrefix(subPath, "/"))
+	targetPath := filepath.Join(folderPath, cleanSubPath)
+	if !strings.HasPrefix(targetPath, folderPath) {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+	entries, err := os.ReadDir(targetPath)
+	if err != nil {
+		http.Error(w, "Folder not found", http.StatusNotFound)
+		return
+	}
+	type folderEntry struct {
+		Name string `json:"name"`
+		Path string `json:"path"`
+	}
+	folders := make([]folderEntry, 0)
+	for _, e := range entries {
+		if e.IsDir() && e.Name() != ".cache" {
+			folders = append(folders, folderEntry{
+				Name: e.Name(),
+				Path: prefix + filepath.Join(cleanSubPath, e.Name()),
+			})
+		}
+	}
+	parent := ""
+	if cleanSubPath != "." {
+		parent = prefix + filepath.Dir(cleanSubPath)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"folders": folders,
+		"parent":  parent,
+		"current": prefix + cleanSubPath,
+	})
+}
+
 func handleUpload(w http.ResponseWriter, r *http.Request) {
 	// Parse multipart form
 	err := r.ParseMultipartForm(maxMemory)
