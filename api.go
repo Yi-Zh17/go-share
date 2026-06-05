@@ -112,6 +112,11 @@ func handleMove(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Access denied", http.StatusForbidden)
 		return
 	}
+	// Ensure the destination directory exists.
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		http.Error(w, "Failed to ensure destination folder exists", http.StatusInternalServerError)
+		return
+	}
 	for _, urlPath := range req.Paths {
 		relPath := strings.TrimPrefix(urlPath, prefix)
 		srcPath := filepath.Join(folderPath, relPath)
@@ -121,7 +126,14 @@ func handleMove(w http.ResponseWriter, r *http.Request) {
 		}
 		name := filepath.Base(srcPath)
 		destPath := filepath.Join(destDir, name)
-		destPath = resolveCollision(destPath)
+
+		// If the destination already exists and is different from the source,
+		// report the conflict instead of silently renaming.
+		if _, err := os.Stat(destPath); err == nil {
+			http.Error(w, fmt.Sprintf("A file named %q already exists in the destination", name), http.StatusConflict)
+			return
+		}
+
 		if err := os.Rename(srcPath, destPath); err != nil {
 			log.Printf("Failed to move %s to %s: %v", srcPath, destPath, err)
 			http.Error(w, "Move failed: "+err.Error(), http.StatusInternalServerError)

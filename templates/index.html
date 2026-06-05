@@ -809,7 +809,11 @@
                     window.location.reload();
                 } else {
                     const text = await response.text();
-                    alert('Move failed: ' + text);
+                    if (response.status === 409) {
+                        alert(text);
+                    } else {
+                        alert('Move failed: ' + text);
+                    }
                 }
             } catch (err) {
                 alert('Move request failed: ' + err.message);
