@@ -124,6 +124,7 @@ func main() {
 	server.HandleFunc("/api/scan-duplicates", handleScanDuplicates)
 	server.HandleFunc("/api/mkdir", handleMkdir)
 	server.HandleFunc("/api/move", handleMove)
+	server.HandleFunc("/api/rename", handleRename)
 	server.HandleFunc("/api/folders", handleListFolders)
 
 	// Launch the background worker in its own Goroutine

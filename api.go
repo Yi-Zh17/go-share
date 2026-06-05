@@ -27,6 +27,15 @@ type DeleteRequest struct {
 	Paths []string `json:"paths"`
 }
 
+// isPathSafe reports whether absPath is inside the share folder (or is the folder itself).
+// Uses a separator-suffixed prefix check to prevent /folder vs /folder-other bypass.
+func isPathSafe(absPath string) bool {
+	if absPath == folderPath {
+		return true
+	}
+	return strings.HasPrefix(absPath, folderPath+string(filepath.Separator))
+}
+
 func cacheKeyFor(relPath string) string {
 	normalized := filepath.ToSlash(filepath.Clean(strings.ReplaceAll(relPath, "\\", "/")))
 	sum := sha256.Sum256([]byte(normalized))
@@ -83,7 +92,7 @@ func handleMkdir(w http.ResponseWriter, r *http.Request) {
 	}
 	cleanSubPath := filepath.Clean(strings.TrimPrefix(req.Path, "/"))
 	targetPath := filepath.Join(folderPath, cleanSubPath, cleanName)
-	if !strings.HasPrefix(targetPath, folderPath) {
+	if !isPathSafe(targetPath) {
 		http.Error(w, "Access denied", http.StatusForbidden)
 		return
 	}
@@ -107,46 +116,114 @@ func handleMove(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
+
 	destDir := filepath.Join(folderPath, filepath.Clean(strings.TrimPrefix(req.Dest, prefix)))
-	if !strings.HasPrefix(destDir, folderPath) {
+	if !isPathSafe(destDir) {
 		http.Error(w, "Access denied", http.StatusForbidden)
 		return
 	}
+
+	log.Printf("Move request: %d items → %s", len(req.Paths), destDir)
+
 	// Ensure the destination directory exists.
 	if err := os.MkdirAll(destDir, 0755); err != nil {
+		log.Printf("Move: MkdirAll(%s) failed: %v", destDir, err)
 		http.Error(w, "Failed to ensure destination folder exists", http.StatusInternalServerError)
 		return
 	}
-	for _, urlPath := range req.Paths {
+
+	for i, urlPath := range req.Paths {
 		relPath := strings.TrimPrefix(urlPath, prefix)
 		srcPath := filepath.Join(folderPath, relPath)
-		if !strings.HasPrefix(srcPath, folderPath) {
+
+		if !isPathSafe(srcPath) {
+			log.Printf("Move: path traversal blocked: %s", srcPath)
 			http.Error(w, "Access denied", http.StatusForbidden)
 			return
 		}
+
 		name := filepath.Base(srcPath)
 		destPath := filepath.Join(destDir, name)
 
-		// If the destination already exists and is different from the source,
-		// report the conflict instead of silently renaming.
-		if _, err := os.Stat(destPath); err == nil {
-			http.Error(w, fmt.Sprintf("A file named %q already exists in the destination", name), http.StatusConflict)
-			return
+		log.Printf("Move [%d/%d]: %s → %s", i+1, len(req.Paths), srcPath, destPath)
+
+		// If the destination already has a file with the same name,
+		// resolve by appending (1), (2), etc — same as upload.
+		resolved := resolveCollision(destPath)
+		if resolved != destPath {
+			log.Printf("Move: name collision, renamed to %s", filepath.Base(resolved))
 		}
 
-		if err := os.Rename(srcPath, destPath); err != nil {
-			log.Printf("Failed to move %s to %s: %v", srcPath, destPath, err)
+		if err := os.Rename(srcPath, resolved); err != nil {
+			log.Printf("Move: os.Rename failed: src=%s dst=%s err=%v", srcPath, resolved, err)
 			http.Error(w, "Move failed: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
+
 		// Move thumbnail cache too
 		srcRel, _ := filepath.Rel(folderPath, srcPath)
-		dstRel, _ := filepath.Rel(folderPath, destPath)
+		dstRel, _ := filepath.Rel(folderPath, resolved)
 		os.Rename(
 			filepath.Join(cachePath, cacheKeyFor(srcRel)),
 			filepath.Join(cachePath, cacheKeyFor(dstRel)),
 		)
 	}
+	log.Printf("Move: %d items moved successfully", len(req.Paths))
+	w.WriteHeader(http.StatusOK)
+}
+
+func handleRename(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Path string `json:"path"`
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	cleanName := filepath.Base(req.Name)
+	if cleanName == "." || cleanName == ".." || cleanName == "" || cleanName != req.Name {
+		http.Error(w, "Invalid name — must be a plain file or folder name, no slashes", http.StatusBadRequest)
+		return
+	}
+
+	relPath := strings.TrimPrefix(req.Path, prefix)
+	oldPath := filepath.Join(folderPath, relPath)
+	if !isPathSafe(oldPath) {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+
+	newPath := filepath.Join(filepath.Dir(oldPath), cleanName)
+	if !isPathSafe(newPath) {
+		http.Error(w, "Access denied", http.StatusForbidden)
+		return
+	}
+
+	// Resolve collision: if the target name already exists (and is a different file),
+	// append (1), (2), etc. — same as upload.
+	newPath = resolveCollision(newPath)
+
+	if err := os.Rename(oldPath, newPath); err != nil {
+		log.Printf("Rename failed: %s → %s: %v", oldPath, newPath, err)
+		http.Error(w, "Rename failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Move thumbnail cache too
+	oldRel, _ := filepath.Rel(folderPath, oldPath)
+	newRel, _ := filepath.Rel(folderPath, newPath)
+	os.Rename(
+		filepath.Join(cachePath, cacheKeyFor(oldRel)),
+		filepath.Join(cachePath, cacheKeyFor(newRel)),
+	)
+
+	log.Printf("Renamed: %s → %s", oldPath, newPath)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -157,7 +234,7 @@ func handleListFolders(w http.ResponseWriter, r *http.Request) {
 	}
 	cleanSubPath := filepath.Clean(strings.TrimPrefix(subPath, "/"))
 	targetPath := filepath.Join(folderPath, cleanSubPath)
-	if !strings.HasPrefix(targetPath, folderPath) {
+	if !isPathSafe(targetPath) {
 		http.Error(w, "Access denied", http.StatusForbidden)
 		return
 	}
@@ -219,6 +296,9 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 			// Create paths
 			cleanFileName := filepath.Base(fileHeader.Filename)
 			fullDiskPath := filepath.Join(folderPath, subPath, cleanFileName)
+			if !isPathSafe(fullDiskPath) {
+				return fmt.Errorf("access denied")
+			}
 			fullDiskPath = resolveCollision(fullDiskPath)
 
 			// Create destination files
@@ -265,7 +345,7 @@ func handleDelete(w http.ResponseWriter, r *http.Request) {
 		fullPath := filepath.Join(folderPath, relPath)
 
 		// Security measure
-		if !strings.HasPrefix(fullPath, folderPath) {
+		if !isPathSafe(fullPath) {
 			http.Error(w, "Access Denied", http.StatusForbidden)
 			return
 		}
@@ -295,7 +375,7 @@ func handleThumbnail(w http.ResponseWriter, r *http.Request) {
 	originalPath := filepath.Join(folderPath, cleanSubPath)
 
 	// Security
-	if !strings.HasPrefix(originalPath, folderPath) {
+	if !isPathSafe(originalPath) {
 		http.Error(w, "Access denied", http.StatusForbidden)
 		return
 	}
