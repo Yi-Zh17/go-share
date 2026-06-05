@@ -16,6 +16,11 @@
             display: block;
         }
 
+        /* Prevent browser scroll/zoom from stealing the drag gesture on cards */
+        .select-mode .file-card {
+            touch-action: none;
+        }
+
         .file-card.selected {
             border-color: #3b82f6;
             background-color: #eff6ff;
@@ -134,6 +139,8 @@
                     </button>
 
                     <div id="bulk-actions" class="hidden flex items-center gap-2 border-l pl-2 border-slate-200">
+                        <button id="btn-select-all" onclick="selectAll()"
+                            class="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition">Select All</button>
                         <button onclick="moveSelected()"
                             class="px-4 py-2 text-sm font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600 transition">Move</button>
                         <button onclick="downloadSelected()"
@@ -376,6 +383,36 @@
         let mouseX = 0;
         let mouseY = 0;
 
+        function selectAll() {
+            const cards = document.querySelectorAll('.file-card');
+            const btn = document.getElementById('btn-select-all');
+            const allSelected = Array.from(cards).every(c => c.classList.contains('selected'));
+
+            cards.forEach(c => {
+                if (allSelected) {
+                    c.classList.remove('selected');
+                    c.querySelector('input[type="checkbox"]').checked = false;
+                } else {
+                    c.classList.add('selected');
+                    c.querySelector('input[type="checkbox"]').checked = true;
+                }
+            });
+
+            btn.textContent = allSelected ? 'Select All' : 'Deselect All';
+        }
+
+        function updateSelectAllButton() {
+            const btn = document.getElementById('btn-select-all');
+            if (!btn) return;
+            const cards = document.querySelectorAll('.file-card');
+            if (cards.length === 0) {
+                btn.textContent = 'Select All';
+                return;
+            }
+            const allSelected = Array.from(cards).every(c => c.classList.contains('selected'));
+            btn.textContent = allSelected ? 'Deselect All' : 'Select All';
+        }
+
         function toggleSelectMode() {
             isSelectMode = !isSelectMode;
             const container = document.getElementById('main-container');
@@ -387,6 +424,7 @@
                 btn.innerText = 'Cancel';
                 btn.classList.add('text-blue-600', 'border-blue-600');
                 bulkActions.classList.remove('hidden');
+                updateSelectAllButton();
             } else {
                 container.classList.remove('select-mode');
                 btn.innerText = 'Select';
@@ -408,6 +446,7 @@
                 const cb = card.querySelector('input[type="checkbox"]');
                 cb.checked = !cb.checked;
                 card.classList.toggle('selected', cb.checked);
+                updateSelectAllButton();
             } else {
                 if (type === 'folder') {
                     window.location.href = `/?path=${url}`;
@@ -703,6 +742,80 @@
             mouseX = e.clientX;
             mouseY = e.clientY;
         });
+
+        // ---- Drag-to-Select ----
+
+        let dragState = null;   // null | 'tracking' | 'active'
+        let dragSelectMode = 'add';
+        let dragTouchedCards = new Set();
+        let dragStartX = 0, dragStartY = 0;
+        let justDragged = false;
+        const DRAG_THRESHOLD = 5;
+
+        const mainContainer = document.getElementById('main-container');
+
+        mainContainer.addEventListener('pointerdown', function(e) {
+            if (!isSelectMode) return;
+            const card = e.target.closest('.file-card');
+            if (!card) return;
+
+            dragState = 'tracking';
+            dragStartX = e.clientX;
+            dragStartY = e.clientY;
+            dragSelectMode = card.classList.contains('selected') ? 'remove' : 'add';
+            dragTouchedCards = new Set();
+            justDragged = false;
+        });
+
+        document.addEventListener('pointermove', function(e) {
+            if (dragState !== 'tracking' && dragState !== 'active') return;
+
+            if (dragState === 'tracking') {
+                const dx = e.clientX - dragStartX;
+                const dy = e.clientY - dragStartY;
+                if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+                dragState = 'active';
+                document.body.style.userSelect = 'none';
+            }
+
+            const el = document.elementFromPoint(e.clientX, e.clientY);
+            if (!el) return;
+            const card = el.closest('.file-card');
+            if (!card || dragTouchedCards.has(card)) return;
+
+            dragTouchedCards.add(card);
+
+            if (dragSelectMode === 'add') {
+                card.classList.add('selected');
+                const cb = card.querySelector('input[type="checkbox"]');
+                if (cb) cb.checked = true;
+            } else {
+                card.classList.remove('selected');
+                const cb = card.querySelector('input[type="checkbox"]');
+                if (cb) cb.checked = false;
+            }
+            updateSelectAllButton();
+        });
+
+        function stopDragSelect() {
+            if (dragState === 'active') {
+                justDragged = true;
+                setTimeout(function() { justDragged = false; }, 50);
+                document.body.style.userSelect = '';
+            }
+            dragState = null;
+            dragTouchedCards.clear();
+        }
+
+        document.addEventListener('pointerup', stopDragSelect);
+        document.addEventListener('pointercancel', stopDragSelect);
+
+        // Prevent the click handler from firing right after a drag
+        const origHandleCardClick = handleCardClick;
+        handleCardClick = function(event, card) {
+            if (justDragged) return;
+            return origHandleCardClick(event, card);
+        };
 
         // ---- Create Folder ----
 
