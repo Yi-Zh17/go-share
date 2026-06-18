@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -133,7 +134,12 @@ func handleMove(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for i, urlPath := range req.Paths {
-		relPath := strings.TrimPrefix(urlPath, prefix)
+		decoded, err := url.PathUnescape(urlPath)
+		if err != nil {
+			http.Error(w, "Invalid path encoding", http.StatusBadRequest)
+			return
+		}
+		relPath := strings.TrimPrefix(decoded, prefix)
 		srcPath := filepath.Join(folderPath, relPath)
 
 		if !isPathSafe(srcPath) {
@@ -197,7 +203,12 @@ func handleRename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	relPath := strings.TrimPrefix(req.Path, prefix)
+	decodedPath, err := url.PathUnescape(req.Path)
+	if err != nil {
+		http.Error(w, "Invalid path encoding", http.StatusBadRequest)
+		return
+	}
+	relPath := strings.TrimPrefix(decodedPath, prefix)
 	oldPath := filepath.Join(folderPath, relPath)
 	if !isPathSafe(oldPath) {
 		http.Error(w, "Access denied", http.StatusForbidden)
@@ -343,8 +354,13 @@ func handleDelete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for _, urlPath := range req.Paths {
+		decoded, err := url.PathUnescape(urlPath)
+		if err != nil {
+			http.Error(w, "Invalid path encoding", http.StatusBadRequest)
+			return
+		}
 		// Trim prefix
-		relPath := strings.TrimPrefix(urlPath, prefix)
+		relPath := strings.TrimPrefix(decoded, prefix)
 
 		// Create absolute path
 		fullPath := filepath.Join(folderPath, relPath)
