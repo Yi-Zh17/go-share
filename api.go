@@ -49,7 +49,7 @@ func resolveCollision(path string) string {
 	ext := filepath.Ext(path)
 	base := strings.TrimSuffix(path, ext)
 	for i := 1; ; i++ {
-		candidate := fmt.Sprintf("%s (%d)%s", base, i, ext)
+		candidate := fmt.Sprintf("%s(%d)%s", base, i, ext)
 		if _, err := os.Stat(candidate); os.IsNotExist(err) {
 			return candidate
 		}
@@ -146,6 +146,11 @@ func handleMove(w http.ResponseWriter, r *http.Request) {
 		destPath := filepath.Join(destDir, name)
 
 		log.Printf("Move [%d/%d]: %s → %s", i+1, len(req.Paths), srcPath, destPath)
+
+		if srcPath == destPath {
+			log.Printf("Move: skipping %s (already in destination)", name)
+			continue
+		}
 
 		// If the destination already has a file with the same name,
 		// resolve by appending (1), (2), etc — same as upload.
