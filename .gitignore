@@ -5,3 +5,4 @@ netdisk
 go-share
 .gomodcache/
 .gocache/
+auth.txt

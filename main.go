@@ -131,6 +131,8 @@ func main() {
 	server.HandleFunc("/api/move", handleMove)
 	server.HandleFunc("/api/rename", handleRename)
 	server.HandleFunc("/api/folders", handleListFolders)
+	server.HandleFunc("/login", handleLogin)
+	server.HandleFunc("/logout", handleLogout)
 
 	// Launch the background worker in its own Goroutine
 	go startBackgroundWorker()

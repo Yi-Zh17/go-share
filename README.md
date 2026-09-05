@@ -18,7 +18,7 @@ For **video thumbnails**, `ffmpeg` must be installed on the system. Image thumbn
 ./go-share
 ```
 
-The server listens on `:8080`. Open `http://<hostname>:8080` in a browser. The browser will prompt for a password (HTTP Basic Auth).
+The server listens on `:8080`. Open `http://<hostname>:8080` in a browser and log in on the page with your password. The login lasts for 30 days per browser, or until you click **Log out** in the header.
 
 On **first run** the server asks you in the terminal to set your own password (input hidden, typed twice for confirmation) and saves it to `auth.txt` next to the binary. Run it in a terminal that first time — if the server is started without one (e.g. as a service), create `auth.txt` manually with the password on a single line.
 
@@ -50,10 +50,10 @@ Edit the constants in `main.go`:
 
 ## Security
 
-Every request (pages, APIs, and raw file downloads) is gated by a single password via HTTP Basic Auth. This is meant to keep random devices on the LAN out, not to be a hardened auth system.
+Every request (pages, APIs, and raw file downloads) is gated by a single password entered on a login page. This is meant to keep random devices on the LAN out, not to be a hardened auth system.
 
+- **Sessions** — a successful login sets a random HttpOnly session cookie, valid for 30 days. There is no username: the password is all there is.
 - **Password storage** — `auth.txt` in the run directory (one line, plaintext). Keep it out of `./folder`; back it up if you like.
-- **Change the password** — edit `auth.txt` and restart.
+- **Change the password** — edit `auth.txt` and restart. Restarting ends all sessions, so everyone must log in again with the new password.
 - **Reset (forgot password)** — delete `auth.txt` and restart; you will be prompted to set a new password.
-- The username field in the browser prompt is ignored — enter anything, the password is all that matters.
-- There is **no HTTPS** — the password and all files travel the LAN in plaintext (the password is base64-encoded in the `Authorization` header). Fine for a trusted home network; otherwise put the server behind a reverse proxy with TLS.
+- There is **no HTTPS** — the password and all files travel the LAN in plaintext. Fine for a trusted home network; otherwise put the server behind a reverse proxy with TLS.
