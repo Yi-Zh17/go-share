@@ -8,7 +8,7 @@ A lightweight single-binary netdisk initially built for Raspberry Pi 4B. Browse,
 go build -o go-share .
 ```
 
-Requires Go 1.24+. The only Go dependency is `github.com/disintegration/imaging` for image thumbnails.
+Requires Go 1.24+. Dependencies: `github.com/disintegration/imaging` for image thumbnails and `golang.org/x/term` for hidden password input.
 
 For **video thumbnails**, `ffmpeg` must be installed on the system. Image thumbnails work without it.
 
@@ -18,7 +18,9 @@ For **video thumbnails**, `ffmpeg` must be installed on the system. Image thumbn
 ./go-share
 ```
 
-The server listens on `:8080`. Open `http://<hostname>:8080` in a browser.
+The server listens on `:8080`. Open `http://<hostname>:8080` in a browser. The browser will prompt for a password (HTTP Basic Auth).
+
+On **first run** the server asks you in the terminal to set your own password (input hidden, typed twice for confirmation) and saves it to `auth.txt` next to the binary. Run it in a terminal that first time — if the server is started without one (e.g. as a service), create `auth.txt` manually with the password on a single line.
 
 All shared files live in the `./folder` directory. Uploaded files land there. A `.cache` subdirectory is created automatically for thumbnails.
 
@@ -48,4 +50,10 @@ Edit the constants in `main.go`:
 
 ## Security
 
-This is intended for a trusted LAN. There is no authentication, no HTTPS, and no user isolation. Anyone on the network can browse, upload, and delete files.
+Every request (pages, APIs, and raw file downloads) is gated by a single password via HTTP Basic Auth. This is meant to keep random devices on the LAN out, not to be a hardened auth system.
+
+- **Password storage** — `auth.txt` in the run directory (one line, plaintext). Keep it out of `./folder`; back it up if you like.
+- **Change the password** — edit `auth.txt` and restart.
+- **Reset (forgot password)** — delete `auth.txt` and restart; you will be prompted to set a new password.
+- The username field in the browser prompt is ignored — enter anything, the password is all that matters.
+- There is **no HTTPS** — the password and all files travel the LAN in plaintext (the password is base64-encoded in the `Authorization` header). Fine for a trusted home network; otherwise put the server behind a reverse proxy with TLS.

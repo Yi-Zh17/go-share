@@ -2,6 +2,9 @@ module github.com/Yi-Zh17/go-share
 
 go 1.24.4
 
-require github.com/disintegration/imaging v1.6.2 // direct
+require (
+	github.com/disintegration/imaging v1.6.2 // direct
+	golang.org/x/term v0.24.0 // direct
+)
 
 require golang.org/x/image v0.0.0-20191009234506-e7c1f5e7dbb8 // indirect

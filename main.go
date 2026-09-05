@@ -113,6 +113,11 @@ func main() {
 		log.Fatal("Cannot create a cache folder:", err)
 	}
 
+	// Load the access password (or prompt to set one on first run)
+	if err := loadOrSetupPassword(); err != nil {
+		log.Fatal("Cannot load or create auth.txt:", err)
+	}
+
 	// Set up the server
 	server := http.NewServeMux()
 	fileServer := http.StripPrefix(prefix, http.FileServer(http.Dir(folderPath)))
@@ -133,7 +138,7 @@ func main() {
 	fmt.Println("The server is listening on localhost", port)
 	log.Fatal((&http.Server{
 		Addr:         port,
-		Handler:      server,
+		Handler:      authMiddleware(server),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 120 * time.Second,
 		IdleTimeout:  120 * time.Second,
