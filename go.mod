@@ -7,4 +7,7 @@ require (
 	golang.org/x/term v0.24.0 // direct
 )
 
-require golang.org/x/image v0.0.0-20191009234506-e7c1f5e7dbb8 // indirect
+require (
+	golang.org/x/image v0.0.0-20191009234506-e7c1f5e7dbb8 // indirect
+	golang.org/x/sys v0.25.0 // indirect
+)
