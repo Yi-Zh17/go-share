@@ -12,11 +12,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/disintegration/imaging"
 )
 
 const maxMemory = 32 << 20
+
+// Per-request deadline for uploads, overriding the server's ReadTimeout.
+const uploadTimeout = 30 * time.Minute
 
 // Limit to 3 concurrent background thumbnail generations.
 // On a 4-core Pi this leaves 1 core free for HTTP handlers and disk I/O.
@@ -285,12 +289,24 @@ func handleListFolders(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleUpload(w http.ResponseWriter, r *http.Request) {
+	// Uploads can take longer than the server-wide ReadTimeout (e.g. large
+	// videos over Wi-Fi), so extend the deadlines for this request only.
+	rc := http.NewResponseController(w)
+	if err := rc.SetReadDeadline(time.Now().Add(uploadTimeout)); err != nil {
+		log.Printf("Upload: cannot extend read deadline: %v", err)
+	}
+	if err := rc.SetWriteDeadline(time.Now().Add(uploadTimeout)); err != nil {
+		log.Printf("Upload: cannot extend write deadline: %v", err)
+	}
+
 	// Parse multipart form
 	err := r.ParseMultipartForm(maxMemory)
 	if err != nil {
-		http.Error(w, "Form too large", http.StatusBadRequest)
+		log.Printf("Upload: failed to parse form: %v", err)
+		http.Error(w, "Failed to read upload: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	defer r.MultipartForm.RemoveAll()
 
 	// Get sub-path
 	subPath := r.FormValue("path")
@@ -334,6 +350,7 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 
 		// If the anonymous function returned an error, halt the upload process
 		if err != nil {
+			log.Printf("Upload: failed to save %s: %v", fileHeader.Filename, err)
 			http.Error(w, "Failed to save file: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
